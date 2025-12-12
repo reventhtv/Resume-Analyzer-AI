@@ -16,6 +16,37 @@ import io,random
 import plotly.express as px # to create visualisations at the admin session
 import plotly.graph_objects as go
 from geopy.geocoders import Nominatim
+
+import streamlit as st
+import os
+import nltk
+
+# ========== NLTK FIX: ensures stopwords/punkt/tagger exist ==========
+NLTK_DATA_DIR = os.path.join(os.getcwd(), "nltk_data")
+os.makedirs(NLTK_DATA_DIR, exist_ok=True)
+
+# Ensure NLTK reads from this directory first
+if NLTK_DATA_DIR not in nltk.data.path:
+    nltk.data.path.insert(0, NLTK_DATA_DIR)
+
+required_nltk_packages = [
+    "stopwords",
+    "punkt",
+    "averaged_perceptron_tagger",
+]
+
+for pkg in required_nltk_packages:
+    try:
+        if pkg == "punkt":
+            nltk.data.find(f"tokenizers/{pkg}")
+        elif pkg == "averaged_perceptron_tagger":
+            nltk.data.find(f"taggers/{pkg}")
+        else:
+            nltk.data.find(f"corpora/{pkg}")
+    except LookupError:
+        nltk.download(pkg, download_dir=NLTK_DATA_DIR, quiet=True)
+# ====================================================================
+
 # libraries used to parse the pdf files
 from pyresparser import ResumeParser
 from pdfminer3.layout import LAParams, LTTextBox
