@@ -7,4 +7,6 @@ PyMySQL==1.0.2          # if you need DB access; otherwise omit
 google-genai>=0.3.0
 geocoder
 plotly>=5.10.0
+geopy>=2.2.0
+
 
