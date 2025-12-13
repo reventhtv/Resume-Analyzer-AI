@@ -78,13 +78,11 @@ def detect_domain_and_expertise(text):
     }
 
     scores = {d: 0 for d in domain_map}
-    matched = {d: [] for d in domain_map}
 
     for domain, keys in domain_map.items():
         for k in keys:
             if k in text:
                 scores[domain] += 2
-                matched[domain].append(k)
 
     if "ericsson" in text:
         scores["Telecommunications"] += 6
@@ -94,7 +92,7 @@ def detect_domain_and_expertise(text):
     best_domain = max(scores, key=scores.get)
     expertise_score = min(int((scores[best_domain] / (sum(scores.values()) or 1)) * 100), 100)
 
-    return best_domain, expertise_score, matched
+    return best_domain, expertise_score
 
 # ================= Management =================
 
@@ -105,7 +103,7 @@ def management_confidence(text):
     if "program manager" in text: score += 30
     return min(score, 100)
 
-# ================= JD MATCHER (v2.5) =================
+# ================= JD MATCHER =================
 
 def jd_matcher(resume_text, jd_text, domain, exp_level, pm_score):
     resume_words = set(resume_text.split())
@@ -115,7 +113,6 @@ def jd_matcher(resume_text, jd_text, domain, exp_level, pm_score):
     missing = jd_words - resume_words
 
     skill_score = min(int(len(matched) / (len(jd_words) or 1) * 100), 100)
-
     domain_bonus = 25 if domain.lower() in jd_text.lower() else 0
     exp_bonus = 15 if exp_level.lower() in jd_text.lower() else 0
     pm_bonus = 10 if pm_score >= 60 else 0
@@ -123,6 +120,33 @@ def jd_matcher(resume_text, jd_text, domain, exp_level, pm_score):
     final_score = min(skill_score * 0.5 + domain_bonus + exp_bonus + pm_bonus, 100)
 
     return int(final_score), sorted(matched), sorted(list(missing))[:15]
+
+# ================= AI JD IMPROVEMENTS (v2.6) =================
+
+def ai_jd_improvements(resume_text, jd_text, domain, exp):
+    prompt = f"""
+You are a senior Technical Recruiter and Career Coach.
+
+Resume domain: {domain}
+Experience level: {exp}
+
+Job Description:
+{jd_text}
+
+Resume Content:
+{resume_text}
+
+Provide JD-specific resume improvement suggestions in the following format:
+
+1. Professional Summary – what to add or change
+2. Experience Section – bullet-level improvements
+3. Skills Section – missing or weak skills to highlight
+4. Certifications / Leadership – recommendations if applicable
+
+Be concise, role-focused, and practical.
+Do NOT rewrite the resume. Only suggest improvements.
+"""
+    return ask_ai(prompt)
 
 # ================= UI =================
 
@@ -146,7 +170,7 @@ if pdf:
 
     exp = detect_experience_level(text)
     structure_score = calculate_structure_score(text)
-    domain, expertise_score, matched_domain_keys = detect_domain_and_expertise(text)
+    domain, expertise_score = detect_domain_and_expertise(text)
     pm_conf = management_confidence(text)
 
     # -------- Resume Overview --------
@@ -187,11 +211,7 @@ if pdf:
         for i, (name, link) in enumerate(course_map.get(domain, [])[:5], 1):
             st.markdown(f"{i}. [{name}]({link})")
 
-        st.subheader("🤖 AI Career Advisor")
-        if st.button("Get AI Guidance"):
-            st.write(ask_ai(text))
-
-    # -------- JD MATCH --------
+    # -------- JD MATCH + AI IMPROVEMENTS --------
     else:
         st.subheader("🎯 Job Description Matcher")
 
@@ -216,6 +236,13 @@ if pdf:
             st.subheader("⚠️ Missing Keywords")
             for k in missing:
                 st.write("•", k)
+
+            st.markdown("---")
+            st.subheader("🤖 AI JD-Specific Resume Improvements")
+
+            if st.button("Get AI Improvement Suggestions"):
+                with st.spinner("Generating JD-specific guidance…"):
+                    st.write(ai_jd_improvements(text, jd_text, domain, exp))
 
 else:
     st.info("Upload a resume to get started.")
