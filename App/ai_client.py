@@ -1,56 +1,70 @@
-# App/UploadedResumes/ai_client.py
+# App/ai_client.py
+"""
+Robust Gemini AI client for Streamlit Resume Analyzer.
+
+Supports:
+- API key auth (AI_API_KEY / GEMINI_API_KEY / GENAI_API_KEY)
+- GCP Service Account JSON via Streamlit secrets (GCP_SA_KEY_JSON)
+- Multiple google-genai SDK call signatures (prevents breaking changes)
+"""
+
 import os
 import json
 import tempfile
 import traceback
 
+# ---------- helpers ----------
+
 def _get_secret(key: str):
-    """Try to read from Streamlit secrets (if available), else env var."""
     try:
-        import streamlit as _st
-        val = _st.secrets.get(key)
-        if val:
-            return val
+        import streamlit as st
+        return st.secrets.get(key)
     except Exception:
-        pass
-    return os.environ.get(key)
+        return os.environ.get(key)
 
-# Read keys (accept multiple names)
-API_KEY = _get_secret("AI_API_KEY") or _get_secret("GEMINI_API_KEY") or _get_secret("GENAI_API_KEY")
-API_PROVIDER = (_get_secret("AI_PROVIDER") or os.environ.get("AI_PROVIDER") or "").lower()
-DEFAULT_MODEL = _get_secret("AI_MODEL") or os.environ.get("AI_MODEL") or "gemini-2.5-flash"
+API_KEY = (
+    _get_secret("AI_API_KEY")
+    or _get_secret("GEMINI_API_KEY")
+    or _get_secret("GENAI_API_KEY")
+)
 
-# If a GCP service account JSON was stored in secrets as GCP_SA_KEY_JSON (triple-quoted string),
-# write it to a temp file and set GOOGLE_APPLICATION_CREDENTIALS for google-genai to pick up.
-def _init_gcp_sa_from_secrets():
+DEFAULT_MODEL = _get_secret("AI_MODEL") or "gemini-2.5-flash"
+API_PROVIDER = (_get_secret("AI_PROVIDER") or "gemini").lower()
+
+# ---------- Service Account handling ----------
+
+def _init_sa_credentials():
     try:
-        import streamlit as _st
-        sa_json = _st.secrets.get("GCP_SA_KEY_JSON")
+        import streamlit as st
+        sa_json = st.secrets.get("GCP_SA_KEY_JSON")
     except Exception:
         sa_json = os.environ.get("GCP_SA_KEY_JSON")
+
     if not sa_json:
         return None
+
     try:
-        # if value looks like a JSON string, keep as-is
         if isinstance(sa_json, dict):
             sa_str = json.dumps(sa_json)
         else:
             sa_str = sa_json
+
         fd, path = tempfile.mkstemp(suffix=".json")
         with os.fdopen(fd, "w") as f:
             f.write(sa_str)
+
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
         return path
-    except Exception as e:
-        print("Failed to write GCP SA JSON to temp file:", e)
+    except Exception:
         return None
 
-# Initialize SA JSON if present
-_sa_path = _init_gcp_sa_from_secrets()
+_sa_path = _init_sa_credentials()
 
-# Try to import google-genai safely
+# ---------- google-genai import ----------
+
 _has_genai = False
 _genai_client = None
+
 try:
     from google import genai  # type: ignore
     _has_genai = True
@@ -58,63 +72,98 @@ except Exception:
     _has_genai = False
 
 def _init_genai_client():
-    global _genai_client, _has_genai
+    global _genai_client
     if not _has_genai:
         return None
     try:
         if API_KEY:
             _genai_client = genai.Client(api_key=API_KEY)
         else:
-            # rely on application default credentials (service account JSON path)
             _genai_client = genai.Client()
         return _genai_client
-    except Exception as e:
+    except Exception:
         _genai_client = None
-        print("Failed to initialize genai client:", e)
         return None
 
 if _has_genai:
     _init_genai_client()
 
-def call_gemini(prompt: str, model: str = None, max_output_tokens: int = 512):
-    model = model or DEFAULT_MODEL
-    if not _has_genai or _genai_client is None:
-        raise RuntimeError("Google Gen AI SDK not available or not initialized.")
-    try:
-        resp = _genai_client.models.generate_content(model=model, contents=prompt, max_output_tokens=max_output_tokens)
-        # try common attributes
-        if hasattr(resp, "text"):
-            return resp.text
-        if isinstance(resp, dict):
-            return resp.get("text") or resp.get("result") or json.dumps(resp)
-        return str(resp)
-    except Exception:
-        raise
+# ---------- response parsing ----------
 
-def ask_ai(prompt: str, model: str = None, max_output_tokens: int = 512):
-    if not prompt:
-        return "No prompt provided."
+def _resp_to_text(resp):
+    if hasattr(resp, "text"):
+        return resp.text
+    if isinstance(resp, dict):
+        if "text" in resp:
+            return resp["text"]
+        if "candidates" in resp and resp["candidates"]:
+            cand = resp["candidates"][0]
+            if isinstance(cand, dict):
+                return cand.get("content") or cand.get("text")
+    return str(resp)
+
+# ---------- Gemini call ----------
+
+def call_gemini(prompt: str, model: str = None):
+    model = model or DEFAULT_MODEL
+
+    if not _has_genai:
+        raise RuntimeError("google-genai SDK not installed")
+
+    if _genai_client is None:
+        _init_genai_client()
+
+    if _genai_client is None:
+        raise RuntimeError("Gemini client not initialized")
+
+    # Try multiple SDK signatures (SDK versions differ)
     try:
-        # prefer explicit provider empty or gemini
-        if API_PROVIDER in ("", "gemini") and _has_genai:
-            if _genai_client is None:
-                _init_genai_client()
-            if _genai_client:
-                try:
-                    out = call_gemini(prompt, model=model, max_output_tokens=max_output_tokens)
-                    return out or "No text returned from model."
-                except Exception as e:
-                    tb = traceback.format_exc()
-                    return f"AI provider error (Gemini): {e}\n\nTraceback:\n{tb}"
-        # If no SDK or no API key present, give instructions
-        if not API_KEY and not _sa_path:
-            return (
-                "AI suggestions are not enabled. To enable them add your API key or service account:\n\n"
-                "1) For API key: Settings → Secrets → Add KEY: AI_API_KEY (or GEMINI_API_KEY / GENAI_API_KEY).\n"
-                "2) For Service Account: Add GCP_SA_KEY_JSON as a triple-quoted JSON string (see docs).\n\n"
-                "Also ensure package `google-genai` is in requirements.txt (package name: google-genai).\n"
-            )
-        return "AI provider not configured or SDK not installed. Please add google-genai to requirements.txt."
+        resp = _genai_client.models.generate_content(
+            model=model,
+            contents=prompt
+        )
+        return _resp_to_text(resp)
+    except TypeError:
+        pass
+
+    try:
+        resp = _genai_client.generate_content(prompt)
+        return _resp_to_text(resp)
+    except Exception:
+        pass
+
+    try:
+        resp = _genai_client.generate_text(
+            model=model,
+            prompt=prompt
+        )
+        return _resp_to_text(resp)
     except Exception as e:
-        tb = traceback.format_exc()
-        return f"Unexpected AI client error: {e}\n\n{tb}"
+        raise RuntimeError(str(e))
+
+# ---------- Public API ----------
+
+def ask_ai(prompt: str):
+    if not prompt:
+        return "No resume text provided."
+
+    try:
+        if API_PROVIDER == "gemini" and _has_genai:
+            out = call_gemini(prompt)
+            return out or "No output returned by model."
+    except Exception as e:
+        return (
+            f"AI provider error (Gemini): {e}\n\n"
+            f"{traceback.format_exc()}"
+        )
+
+    if not API_KEY and not _sa_path:
+        return (
+            "AI suggestions are not enabled.\n\n"
+            "Add either:\n"
+            "- AI_API_KEY (Gemini API key), OR\n"
+            "- GCP_SA_KEY_JSON (service account JSON)\n"
+            "in Streamlit Secrets."
+        )
+
+    return "AI provider not available."
