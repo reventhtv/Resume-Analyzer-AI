@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import io
 import re
 import base64
 import random
@@ -24,7 +23,7 @@ try:
     from ai_client import ask_ai
 except Exception:
     def ask_ai(prompt):
-        return "AI is not configured."
+        return "AI service not configured."
 
 # ---------------- Helpers ----------------
 def extract_text_from_pdf(path):
@@ -55,7 +54,7 @@ page = st.sidebar.radio(
 )
 
 # ======================================================
-# ================ RESUME ANALYZER =====================
+# ================= RESUME ANALYZER ====================
 # ======================================================
 if page == "Resume Analyzer":
 
@@ -77,7 +76,7 @@ if page == "Resume Analyzer":
         text = normalize(resume_text)
 
         # ---------------- Experience Level ----------------
-        if "manager" in text or "lead" in text or "architect" in text:
+        if any(k in text for k in ["lead", "manager", "architect", "principal"]):
             experience = "Senior / Lead"
         elif "intern" in text:
             experience = "Intermediate"
@@ -88,20 +87,18 @@ if page == "Resume Analyzer":
 
         # ---------------- Domain Detection ----------------
         domains = {
-            "Telecommunications": ["ran", "lte", "5g", "ericsson", "telecom"],
+            "Telecommunications": ["ran", "lte", "5g", "telecom", "ericsson"],
             "Embedded Systems": ["embedded", "rtos", "firmware", "microcontroller"],
             "Cloud & DevOps": ["aws", "azure", "gcp", "docker", "kubernetes", "terraform"],
             "Cybersecurity": ["security", "siem", "soc", "iso", "penetration"],
-            "FinTech": ["payments", "banking", "fintech", "risk", "trading"],
+            "FinTech": ["fintech", "banking", "payments", "trading", "risk"],
             "Data Science": ["machine learning", "data science", "tensorflow"],
-            "Program Management": ["pmp", "capm", "program manager", "scrum"]
+            "Program Management": ["pmp", "capm", "program manager", "roadmap", "stakeholder"]
         }
 
-        domain_scores = {}
-        for d, kws in domains.items():
-            domain_scores[d] = sum(1 for k in kws if k in text)
-
+        domain_scores = {d: sum(1 for k in kws if k in text) for d, kws in domains.items()}
         best_domain = max(domain_scores, key=domain_scores.get)
+
         st.markdown(f"### 🎯 Best-fit Primary Domain: **{best_domain}**")
 
         # ---------------- Resume Scores ----------------
@@ -111,19 +108,24 @@ if page == "Resume Analyzer":
 
         st.subheader("📊 Resume Strength")
         st.progress(total_score / 100)
-        st.write(f"**Structure:** {structure_score}/50")
-        st.write(f"**Expertise:** {expertise_score}/50")
+        st.write(f"**Structure Score:** {structure_score}/50")
+        st.write(f"**Expertise Score:** {expertise_score}/50")
         st.write(f"**Overall Score:** {total_score}/100")
 
         # ---------------- Skills ----------------
         keywords = [
-            "python","c","c++","java","cloud","aws","docker","kubernetes",
-            "telecom","5g","iot","embedded","pmp","capm","devops"
+            "python", "c", "c++", "java", "aws", "docker", "kubernetes",
+            "5g", "iot", "embedded", "pmp", "capm", "devops"
         ]
         skills = [k for k in keywords if k in text]
 
         st.subheader("🛠 Detected Skills")
         st_tags(label="Skills", value=skills, key="skills")
+
+        # ---------------- Learning Content ----------------
+        st.subheader("🎥 Learning Resources")
+        st.video(random.choice(resume_videos))
+        st.video(random.choice(interview_videos))
 
 # ======================================================
 # ================= JOB MATCH ==========================
@@ -137,9 +139,8 @@ elif page == "Job Match":
         resume_text = st.session_state.get("resume_text", "")
         combined = normalize(resume_text + jd)
 
-        # -------- Role Fit --------
         roles = {
-            "Technical Program Manager": ["program", "stakeholder", "roadmap"],
+            "Technical Program Manager": ["program", "roadmap", "stakeholder"],
             "RAN Engineer": ["ran", "lte", "5g"],
             "Embedded Lead": ["embedded", "firmware", "rtos"],
             "Cloud Engineer": ["aws", "docker", "kubernetes"],
@@ -157,42 +158,10 @@ elif page == "Job Match":
             st.write(f"- {r}")
         st.write(f"**Confidence Score:** {confidence}%")
 
-        # ---------------- Buy Me a Coffee ----------------
-        st.markdown(
-            """
-            <div style="
-                background-color:#f8f9fa;
-                padding:18px;
-                border-radius:12px;
-                border:1px solid #ddd;
-                text-align:center;
-                margin-top:25px;
-                margin-bottom:25px;">
-                <h4>☕ Enjoying CareerScope AI?</h4>
-                <p style="font-size:15px;">
-                    If this tool helped you gain clarity on your role fit or career direction,
-                    you can support the project with a coffee.
-                </p>
-                <a href="https://www.buymeacoffee.com/revanththiruvallur" target="_blank"
-                   style="
-                    display:inline-block;
-                    padding:10px 20px;
-                    background-color:#ffdd00;
-                    color:#000;
-                    font-weight:600;
-                    border-radius:8px;
-                    text-decoration:none;">
-                    Buy me a coffee ☕
-                </a>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
         # ---------------- AI Improvements ----------------
         st.subheader("🤖 AI JD-Specific Resume Improvements")
         if st.button("Get AI Improvement Suggestions"):
-            with st.spinner("Generating AI insights..."):
+            with st.spinner("Generating AI insights…"):
                 prompt = f"""
                 You are a senior hiring manager.
                 Compare this resume with the job description and suggest:
@@ -218,10 +187,8 @@ else:
     **CareerScope AI** helps professionals understand:
     - Their strongest technical domain
     - Career trajectory & role fit
-    - ATS gaps and confidence level
-    - Job-specific improvement areas using AI
+    - Resume structure vs expertise balance
+    - Job-specific improvement areas (AI-assisted)
 
-    Built for engineers, managers, and career switchers.
-
-    🚀 Soft-launched as an indie product.
+    Built as an indie product for learning, clarity, and career exploration.
     """)
