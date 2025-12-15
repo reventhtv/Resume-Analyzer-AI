@@ -1,286 +1,211 @@
 import streamlit as st
 import os
-import csv
+import io
+import re
 import random
-import datetime
+import base64
+from PIL import Image
 import pdfplumber
 
+from streamlit_tags import st_tags
 from Courses import (
     ds_course, web_course, android_course,
     ios_course, uiux_course,
     resume_videos, interview_videos
 )
 
-# ---------- Page config ----------
+# ---------------- Page Config ----------------
 st.set_page_config(
     page_title="CareerScope AI",
-    page_icon="🎯",
+    page_icon="🚀",
     layout="wide"
 )
 
-# ---------- AI client ----------
+# ---------------- AI Client ----------------
 try:
     from ai_client import ask_ai
 except Exception:
     def ask_ai(prompt):
         return "AI client not configured."
 
-# ================= Helpers =================
-
+# ---------------- Helpers ----------------
 def extract_text_from_pdf(path):
     text = ""
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             text += page.extract_text() or ""
-    return text.lower()
+    return text
 
-def render_pdf_preview_all_pages(path):
-    st.subheader("📄 Resume Preview")
-    with pdfplumber.open(path) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
-            img = page.to_image(resolution=150).original
-            st.image(img, caption=f"Page {i}", use_column_width=True)
+def show_pdf_all_pages(path):
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
 
-# ================= Experience =================
+    st.markdown(
+        f"""
+        <iframe src="data:application/pdf;base64,{b64}"
+                width="100%" height="900"
+                style="border: none;"></iframe>
+        """,
+        unsafe_allow_html=True
+    )
 
-def detect_experience_level(text):
-    if any(k in text for k in ["senior", "lead", "architect", "manager"]):
-        return "Experienced"
-    if any(k in text for k in ["internship", "intern", "trainee"]):
-        return "Intermediate"
-    return "Fresher"
+def course_recommender(course_list):
+    st.subheader("📚 Recommended Courses")
+    k = st.slider("Number of recommendations", 1, 10, 5)
+    random.shuffle(course_list)
+    for i, (name, link) in enumerate(course_list[:k], 1):
+        st.markdown(f"{i}. [{name}]({link})")
 
-# ================= Resume Structure =================
+# ---------------- Domain Detection ----------------
+def detect_domain(skills, text):
+    text = text.lower()
+    skills = [s.lower() for s in skills]
 
-def calculate_structure_score(text):
+    if any(k in text for k in ["lte", "5g", "ran", "rf", "telecom", "wireless"]):
+        return "Telecommunications"
+    if any(k in text for k in ["embedded", "firmware", "microcontroller", "rtos"]):
+        return "Embedded Systems"
+    if any(k in skills for k in ["aws", "docker", "kubernetes", "ci/cd"]):
+        return "Cloud / DevOps"
+    if any(k in text for k in ["payments", "fintech", "banking", "lending"]):
+        return "FinTech"
+    if any(k in skills for k in ["python", "ml", "ai", "tensorflow"]):
+        return "Data Science"
+    return "General Software / Technology"
+
+# ---------------- Experience Level ----------------
+def detect_experience(text):
+    text = text.lower()
+    if "intern" in text:
+        return "Early Career / Intern"
+    if any(k in text for k in ["senior", "lead", "manager", "principal"]):
+        return "Senior / Lead"
+    return "Mid-level Professional"
+
+# ---------------- Resume Score ----------------
+def resume_score(text):
     score = 0
     sections = [
-        "summary", "education", "experience", "skills",
-        "projects", "certification", "achievement", "internship"
+        "summary", "experience", "education",
+        "skills", "projects", "certification"
     ]
-    for sec in sections:
-        if sec in text:
-            score += 12
+    for s in sections:
+        if s in text.lower():
+            score += 10
     return min(score, 100)
 
-# ================= Domain & Expertise =================
+# ================= UI =================
+st.title("🚀 CareerScope AI")
 
-def detect_domain_and_expertise(text):
-    domain_map = {
-        "Telecommunications": ["5g", "lte", "ran", "rf", "3gpp"],
-        "Embedded Systems": ["embedded", "firmware", "rtos", "microcontroller"],
-        "Cloud Engineering": ["terraform", "cloudformation", "iam", "vpc"],
-        "DevOps / Platform": ["kubernetes", "helm", "ci/cd", "jenkins"],
-        "Cybersecurity": ["soc", "siem", "pentest", "iso 27001"],
-        "Data Science": ["machine learning", "tensorflow"],
-        "Web Development": ["react", "django", "javascript"]
-    }
+section = st.sidebar.selectbox(
+    "Navigate",
+    ["Resume Analyzer", "Job Match", "About"]
+)
 
-    scores = {d: 0 for d in domain_map}
+# ================= Resume Analyzer =================
+if section == "Resume Analyzer":
 
-    for domain, keys in domain_map.items():
-        for k in keys:
-            if k in text:
-                scores[domain] += 2
+    st.subheader("Upload your resume (PDF)")
+    pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
 
-    # Company signals
-    if "ericsson" in text:
-        scores["Telecommunications"] += 6
-    if "verisure" in text:
-        scores["Embedded Systems"] += 5
+    if pdf_file:
+        os.makedirs("Uploaded_Resumes", exist_ok=True)
+        save_path = f"Uploaded_Resumes/{pdf_file.name}"
 
-    best_domain = max(scores, key=scores.get)
-    expertise_score = min(
-        int((scores[best_domain] / (sum(scores.values()) or 1)) * 100),
-        100
-    )
+        with open(save_path, "wb") as f:
+            f.write(pdf_file.getbuffer())
 
-    return best_domain, expertise_score
+        st.subheader("📄 Resume Preview")
+        show_pdf_all_pages(save_path)
 
-# ================= Management =================
+        resume_text = extract_text_from_pdf(save_path)
+        st.session_state["resume_text"] = resume_text
 
-def management_confidence(text):
-    score = 0
-    if "pmp" in text:
-        score += 40
-    if "capm" in text:
-        score += 30
-    if "program manager" in text:
-        score += 30
-    return min(score, 100)
+        skills = []
+        keywords = [
+            "python","java","c++","aws","docker","kubernetes",
+            "rtos","embedded","lte","5g","cloud","fintech",
+            "devops","react","sql"
+        ]
+        for kw in keywords:
+            if kw in resume_text.lower():
+                skills.append(kw)
 
-# ================= JD MATCHER =================
+        domain = detect_domain(skills, resume_text)
+        experience = detect_experience(resume_text)
+        score = resume_score(resume_text)
 
-def jd_matcher(resume_text, jd_text, domain, exp_level, pm_score):
-    resume_words = set(resume_text.split())
-    jd_words = set(jd_text.lower().split())
+        st.header("📊 Resume Insights")
+        st.write("**Best-fit Domain:**", domain)
+        st.write("**Experience Level:**", experience)
+        st.write("**Resume Strength Score:**", f"{score}%")
 
-    matched = resume_words & jd_words
-    missing = jd_words - resume_words
+        st.subheader("Detected Skills")
+        st_tags(label="Skills", value=skills, key="skills")
 
-    skill_score = min(
-        int(len(matched) / (len(jd_words) or 1) * 100),
-        100
-    )
+# ================= Job Match =================
+elif section == "Job Match":
 
-    domain_bonus = 25 if domain.lower() in jd_text.lower() else 0
-    exp_bonus = 15 if exp_level.lower() in jd_text.lower() else 0
-    pm_bonus = 10 if pm_score >= 60 else 0
+    st.subheader("Paste Job Description")
+    jd_text = st.text_area("Job Description", height=220)
 
-    final_score = min(
-        skill_score * 0.5 + domain_bonus + exp_bonus + pm_bonus,
-        100
-    )
+    if st.button("Analyze Job Fit"):
+        resume_text = st.session_state.get("resume_text", "")
 
-    return int(final_score), sorted(matched), sorted(list(missing))[:15]
+        if not resume_text:
+            st.warning("Please upload a resume first.")
+        else:
+            with st.spinner("Analyzing resume vs job description..."):
+                prompt = f"""
+You are a career coach.
 
-# ================= AI JD IMPROVEMENTS =================
+Analyze the resume against the job description and provide:
+1. Role fit assessment
+2. Matching strengths
+3. Missing skills / gaps
+4. Clear improvement suggestions
 
-def ai_jd_improvements(resume_text, jd_text, domain, exp):
-    prompt = f"""
-You are a senior Technical Recruiter and Career Coach.
-
-Resume domain: {domain}
-Experience level: {exp}
+Resume:
+{resume_text}
 
 Job Description:
 {jd_text}
-
-Resume Content:
-{resume_text}
-
-Provide JD-specific resume improvement suggestions in this format:
-
-1. Professional Summary – what to add or adjust
-2. Experience Section – bullet-level improvements
-3. Skills Section – missing or weak skills
-4. Certifications / Leadership – recommendations
-
-Be concise, role-focused, and practical.
-Do NOT rewrite the resume.
 """
-    return ask_ai(prompt)
+                ai_output = ask_ai(prompt)
 
-# ================= UI =================
+            st.success("🤖 AI Job Match Insights")
+            st.write(ai_output)
 
-st.title("🎯 CareerScope AI")
-st.caption("Career & Role Intelligence Platform")
-
-page = st.sidebar.radio(
-    "Navigate",
-    ["Resume Overview", "Career Insights", "Growth & Guidance", "🎯 Job Match"]
-)
-
-pdf = st.sidebar.file_uploader("Upload Resume (PDF)", type=["pdf"])
-
-# ---------- Session state init ----------
-if "jd_analyzed" not in st.session_state:
-    st.session_state.jd_analyzed = False
-
-if pdf:
-    os.makedirs("Uploaded_Resumes", exist_ok=True)
-    path = f"Uploaded_Resumes/{pdf.name}"
-    with open(path, "wb") as f:
-        f.write(pdf.getbuffer())
-
-    resume_text = extract_text_from_pdf(path)
-
-    exp = detect_experience_level(resume_text)
-    structure_score = calculate_structure_score(resume_text)
-    domain, expertise_score = detect_domain_and_expertise(resume_text)
-    pm_conf = management_confidence(resume_text)
-
-    # ---------- Resume Overview ----------
-    if page == "Resume Overview":
-        render_pdf_preview_all_pages(path)
-
-        st.subheader("📊 Resume Structure Score (ATS Readiness)")
-        st.progress(structure_score / 100)
-        st.metric("Score", f"{structure_score}%")
-
-        st.subheader("🧭 Experience Level")
-        st.info(exp)
-
-    # ---------- Career Insights ----------
-    elif page == "Career Insights":
-        st.subheader("🎯 Primary Domain")
-        st.success(domain)
-
-        st.subheader("🧠 Domain Expertise Score")
-        st.progress(expertise_score / 100)
-        st.metric("Expertise", f"{expertise_score}%")
-
-        if pm_conf:
-            st.subheader("📌 Management Readiness")
-            st.progress(pm_conf / 100)
-            st.metric("PM Confidence", f"{pm_conf}%")
-
-    # ---------- Growth ----------
-    elif page == "Growth & Guidance":
-        st.subheader("📚 Course Recommendations")
-        course_map = {
-            "Telecommunications": ds_course,
-            "Embedded Systems": android_course,
-            "Cloud Engineering": web_course,
-            "DevOps / Platform": web_course,
-            "Cybersecurity": ds_course,
-        }
-        for i, (name, link) in enumerate(course_map.get(domain, [])[:5], 1):
-            st.markdown(f"{i}. [{name}]({link})")
-
-        st.subheader("🎥 Resume Tips")
-        st.video(random.choice(resume_videos))
-
-        st.subheader("🎥 Interview Tips")
-        st.video(random.choice(interview_videos))
-
-    # ---------- Job Match (FIXED) ----------
-    else:
-        st.subheader("🎯 Job Description Matcher")
-
-        jd_text = st.text_area(
-            "Paste Job Description",
-            height=250,
-            placeholder="Paste the job description here…",
-            key="jd_text"
-        )
-
-        if st.button("Analyze Job Fit"):
-            score, matched, missing = jd_matcher(
-                resume_text, jd_text, domain, exp, pm_conf
+            # -------- Buy Me a Coffee (CONTEXTUAL) --------
+            st.markdown("---")
+            st.markdown(
+                """
+                <div style="text-align: center; color: grey; font-size: 14px;">
+                    <p>
+                        If CareerScope AI helped you gain clarity, you can support this project ☕
+                    </p>
+                    <p>
+                        <a href="https://www.buymeacoffee.com/revanththiruvallur"
+                           target="_blank"
+                           style="font-weight: bold; text-decoration: none;">
+                           👉 Buy me a coffee
+                        </a>
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
-            st.session_state.jd_analyzed = True
-            st.session_state.jd_score = score
-            st.session_state.jd_matched = matched
-            st.session_state.jd_missing = missing
-
-        # ---------- Persist results ----------
-        if st.session_state.jd_analyzed:
-            st.subheader("📊 Role Fit Score")
-            st.progress(st.session_state.jd_score / 100)
-            st.metric("Fit Score", f"{st.session_state.jd_score}%")
-
-            st.subheader("✅ Matched Keywords")
-            st.write(", ".join(st.session_state.jd_matched[:20]) or "—")
-
-            st.subheader("⚠️ Missing Keywords")
-            for k in st.session_state.jd_missing:
-                st.write("•", k)
-
-            st.markdown("---")
-            st.subheader("🤖 AI JD-Specific Resume Improvements")
-
-            if st.button("Get AI Improvement Suggestions"):
-                with st.spinner("Generating JD-specific guidance…"):
-                    st.write(
-                        ai_jd_improvements(
-                            resume_text,
-                            jd_text,
-                            domain,
-                            exp
-                        )
-                    )
-
+# ================= About =================
 else:
-    st.info("Upload a resume to get started.")
+    st.markdown("""
+### About CareerScope AI
+
+CareerScope AI is an explainable career intelligence tool that helps professionals
+understand **where their resume fits**, **how it matches a job description**, and
+**what to improve** — beyond keyword stuffing.
+
+Built as a learning and product experiment.
+
+🔗 Live Demo: https://careerscopeai.in
+""")
