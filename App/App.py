@@ -4,6 +4,7 @@ import re
 import random
 import base64
 import hashlib
+import time
 import pdfplumber
 
 from streamlit_tags import st_tags
@@ -26,6 +27,9 @@ try:
 except Exception:
     def ask_ai(prompt):
         return "AI service temporarily unavailable."
+
+# ---------------- Constants ----------------
+AI_CACHE_TTL = 30 * 60  # 30 minutes
 
 # ---------------- Sidebar ----------------
 st.sidebar.title("CareerScope AI")
@@ -100,6 +104,13 @@ def make_cache_key(*args):
     joined = "||".join(args)
     return hashlib.sha256(joined.encode()).hexdigest()
 
+def init_ai_cache():
+    if "ai_cache" not in st.session_state:
+        st.session_state["ai_cache"] = {}
+
+def is_cache_valid(entry):
+    return (time.time() - entry["timestamp"]) < AI_CACHE_TTL
+
 # ---------------- UI ----------------
 st.title("🎯 CareerScope AI")
 
@@ -114,6 +125,10 @@ if section == "Resume Analysis":
 
         with open(path, "wb") as f:
             f.write(uploaded.getbuffer())
+
+        # Clear cache on new resume
+        st.session_state.pop("ai_cache", None)
+        st.session_state.pop("job_fit_done", None)
 
         st.subheader("📄 Resume Preview")
         show_pdf(path)
@@ -166,36 +181,41 @@ elif section == "Job Match":
 
             st.session_state["job_fit_done"] = True
 
-        if st.session_state.get("job_fit_done") and st.button("Get AI Suggestions"):
+        if st.session_state.get("job_fit_done"):
 
-            cache_key = make_cache_key(
-                st.session_state["resume_text"],
-                jd,
-                "job_fit_ai"
-            )
+            init_ai_cache()
 
-            if "ai_cache" not in st.session_state:
-                st.session_state["ai_cache"] = {}
+            if st.button("Get AI Suggestions"):
+                resume_text = st.session_state["resume_text"]
 
-            if cache_key in st.session_state["ai_cache"]:
-                st.success("Loaded from cache")
-                st.write(st.session_state["ai_cache"][cache_key])
-            else:
-                with st.spinner("Generating AI suggestions…"):
-                    prompt = f"""
+                cache_key = make_cache_key(resume_text, jd, "jd_ai")
+
+                cache_entry = st.session_state["ai_cache"].get(cache_key)
+
+                if cache_entry and is_cache_valid(cache_entry):
+                    st.success("Loaded from cache")
+                    st.write(cache_entry["response"])
+                else:
+                    with st.spinner("Generating AI suggestions…"):
+                        prompt = f"""
 You are a senior career coach.
 
 Resume:
-{st.session_state['resume_text']}
+{resume_text}
 
 Job Description:
 {jd}
 
 Give JD-specific resume improvement suggestions.
 """
-                    result = ask_ai(prompt)
-                    st.session_state["ai_cache"][cache_key] = result
-                    st.write(result)
+                        response = ask_ai(prompt)
+
+                        st.session_state["ai_cache"][cache_key] = {
+                            "response": response,
+                            "timestamp": time.time()
+                        }
+
+                        st.write(response)
 
 # ================= About =================
 else:
@@ -207,7 +227,7 @@ CareerScope AI helps professionals understand:
 - **Why they fit**
 - **How to improve**
 
-Features include resume analysis, ATS gap detection,
+It combines resume analysis, ATS gap detection,
 job matching, and AI-powered improvement suggestions.
 
 Built with ❤️ using Streamlit and Gemini.
