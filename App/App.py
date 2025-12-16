@@ -1,11 +1,10 @@
 import streamlit as st
 import os
-import io
 import re
 import random
 import base64
+import hashlib
 import pdfplumber
-from PIL import Image
 
 from streamlit_tags import st_tags
 from Courses import (
@@ -30,22 +29,10 @@ except Exception:
 
 # ---------------- Sidebar ----------------
 st.sidebar.title("CareerScope AI")
-st.sidebar.caption("AI-powered career clarity")
-
 section = st.sidebar.radio(
     "Navigate",
     ["Resume Analysis", "Job Match", "About"]
 )
-
-# ---- Buy Me a Coffee (SAFE + ALWAYS VISIBLE) ----
-st.sidebar.markdown("---")
-st.sidebar.subheader("☕ Support the project")
-
-if st.sidebar.button("Buy me a coffee"):
-    st.sidebar.markdown(
-        "[Click here to support ❤️](https://www.buymeacoffee.com/revanththiruvallur)",
-        unsafe_allow_html=True
-    )
 
 # ---------------- Helpers ----------------
 def extract_text_from_pdf(path):
@@ -61,7 +48,7 @@ def show_pdf(path):
     st.markdown(
         f"""
         <iframe src="data:application/pdf;base64,{b64}"
-        width="100%" height="900" type="application/pdf"></iframe>
+        width="100%" height="900"></iframe>
         """,
         unsafe_allow_html=True
     )
@@ -80,37 +67,38 @@ def detect_experience(text):
 
 def detect_domains(skills):
     domains = []
+    s = [x.lower() for x in skills]
 
-    skillset = [s.lower() for s in skills]
-
-    if any(k in skillset for k in ["python","ml","ai","tensorflow","pytorch"]):
+    if any(k in s for k in ["python","ml","ai","tensorflow","pytorch"]):
         domains.append("Data Science / AI")
-    if any(k in skillset for k in ["react","django","javascript","node"]):
+    if any(k in s for k in ["react","django","javascript","node"]):
         domains.append("Web Development")
-    if any(k in skillset for k in ["embedded","rtos","c","c++","iot"]):
+    if any(k in s for k in ["embedded","rtos","iot","c","c++"]):
         domains.append("Embedded Systems / IoT")
-    if any(k in skillset for k in ["5g","lte","ran","telecom"]):
+    if any(k in s for k in ["5g","lte","ran","telecom"]):
         domains.append("Telecommunications")
-    if any(k in skillset for k in ["aws","azure","gcp","docker","kubernetes"]):
+    if any(k in s for k in ["aws","azure","gcp","docker","kubernetes"]):
         domains.append("Cloud / DevOps")
-    if any(k in skillset for k in ["security","cyber","iam","soc"]):
+    if any(k in s for k in ["cyber","security","iam","soc"]):
         domains.append("Cybersecurity")
-    if any(k in skillset for k in ["pmp","capm","scrum","agile"]):
+    if any(k in s for k in ["pmp","capm","scrum","agile"]):
         domains.append("Program / Project Management")
 
     return domains or ["General IT"]
 
 def resume_score(text, skills):
     structure = 0
-    expertise = 0
+    expertise = min(len(skills) * 5, 100)
 
-    sections = ["experience","education","skills","projects","certifications"]
-    for sec in sections:
+    for sec in ["experience","education","skills","projects","certifications"]:
         if sec in text.lower():
             structure += 20
 
-    expertise = min(len(skills) * 5, 100)
     return structure, expertise
+
+def make_cache_key(*args):
+    joined = "||".join(args)
+    return hashlib.sha256(joined.encode()).hexdigest()
 
 # ---------------- UI ----------------
 st.title("🎯 CareerScope AI")
@@ -130,39 +118,29 @@ if section == "Resume Analysis":
         st.subheader("📄 Resume Preview")
         show_pdf(path)
 
-        try:
-            resume_text = extract_text_from_pdf(path)
-        except Exception:
-            resume_text = ""
-
+        resume_text = extract_text_from_pdf(path)
         st.session_state["resume_text"] = resume_text
 
-        # ---- Skill Extraction (safe fallback) ----
         skills = re.findall(
             r"\b(python|java|c\+\+|c|aws|azure|gcp|docker|kubernetes|iot|rtos|5g|lte|ran|react|django|ml|ai|tensorflow|pytorch|scrum|pmp|capm)\b",
             resume_text.lower()
         )
         skills = sorted(set(skills))
 
-        # ---- Analysis ----
-        exp_level = detect_experience(resume_text)
+        exp = detect_experience(resume_text)
         domains = detect_domains(skills)
-        structure_score, expertise_score = resume_score(resume_text, skills)
+        structure, expertise = resume_score(resume_text, skills)
 
         st.subheader("📊 Career Insights")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Experience Level", exp_level)
-        col2.metric("Structure Score", f"{structure_score}%")
-        col3.metric("Expertise Score", f"{expertise_score}%")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Experience Level", exp)
+        c2.metric("Structure Score", f"{structure}%")
+        c3.metric("Expertise Score", f"{expertise}%")
 
-        st.markdown("**Best-fit Domains:**")
-        st_tags(label="Domains", value=domains, key="domains")
+        st_tags("Best-fit Domains", domains, key="domains")
+        st_tags("Detected Skills", skills, key="skills")
 
-        st.markdown("**Detected Skills:**")
-        st_tags(label="Skills", value=skills, key="skills")
-
-        st.subheader("🎥 Learning Resources")
         st.video(random.choice(resume_videos))
         st.video(random.choice(interview_videos))
 
@@ -170,7 +148,7 @@ if section == "Resume Analysis":
 elif section == "Job Match":
 
     if "resume_text" not in st.session_state:
-        st.warning("Please upload a resume first.")
+        st.warning("Upload a resume first.")
     else:
         jd = st.text_area("Paste Job Description")
 
@@ -178,25 +156,32 @@ elif section == "Job Match":
             resume_text = st.session_state["resume_text"]
 
             missing = [
-                w for w in ["cloud","security","agile","leadership"]
-                if w not in resume_text.lower()
+                k for k in ["cloud","security","agile","leadership"]
+                if k not in resume_text.lower()
             ]
-
             confidence = max(100 - len(missing) * 15, 40)
 
-            st.subheader("🎯 Job Fit Summary")
             st.metric("Confidence Score", f"{confidence}%")
-
-            st.markdown("**Missing / Weak Keywords:**")
-            st.write(", ".join(missing) if missing else "None 🎉")
+            st.write("Missing Keywords:", ", ".join(missing) or "None 🎉")
 
             st.session_state["job_fit_done"] = True
 
-        if st.session_state.get("job_fit_done"):
-            st.subheader("🤖 AI Improvement Suggestions")
+        if st.session_state.get("job_fit_done") and st.button("Get AI Suggestions"):
 
-            if st.button("Get AI Suggestions"):
-                with st.spinner("Analyzing with AI…"):
+            cache_key = make_cache_key(
+                st.session_state["resume_text"],
+                jd,
+                "job_fit_ai"
+            )
+
+            if "ai_cache" not in st.session_state:
+                st.session_state["ai_cache"] = {}
+
+            if cache_key in st.session_state["ai_cache"]:
+                st.success("Loaded from cache")
+                st.write(st.session_state["ai_cache"][cache_key])
+            else:
+                with st.spinner("Generating AI suggestions…"):
                     prompt = f"""
 You are a senior career coach.
 
@@ -206,24 +191,24 @@ Resume:
 Job Description:
 {jd}
 
-Suggest improvements to maximize role fit.
+Give JD-specific resume improvement suggestions.
 """
-                    st.write(ask_ai(prompt))
+                    result = ask_ai(prompt)
+                    st.session_state["ai_cache"][cache_key] = result
+                    st.write(result)
 
 # ================= About =================
 else:
     st.markdown("""
 ### About CareerScope AI
 
-CareerScope AI helps professionals understand **where they fit**,  
-**why they fit**, and **how to improve** for their next role.
+CareerScope AI helps professionals understand:
+- **Where they fit**
+- **Why they fit**
+- **How to improve**
 
-**What it does:**
-- Resume analysis
-- Domain detection
-- ATS gap identification
-- Job description matching
-- AI-powered improvement suggestions
+Features include resume analysis, ATS gap detection,
+job matching, and AI-powered improvement suggestions.
 
-Built with ❤️ using Streamlit & Gemini.
+Built with ❤️ using Streamlit and Gemini.
 """)
