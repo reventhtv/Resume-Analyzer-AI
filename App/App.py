@@ -72,7 +72,6 @@ if page == "Resume Analyzer":
 
         resume_text = extract_text_from_pdf(path)
         st.session_state["resume_text"] = resume_text
-
         text = normalize(resume_text)
 
         # ---------------- Experience Level ----------------
@@ -152,11 +151,47 @@ elif page == "Job Match":
 
         confidence = min(100, sum(role_scores.values()) * 10)
 
+        # ---------------- Job Fit Summary ----------------
         st.success("### ✅ Job Fit Summary")
         st.write("**Recommended Roles:**")
         for r in best_roles:
             st.write(f"- {r}")
         st.write(f"**Confidence Score:** {confidence}%")
+
+        # ---------------- Buy Me a Coffee ----------------
+        st.markdown(
+            """
+            <div style="
+                background-color:#f8f9fa;
+                padding:18px;
+                border-radius:12px;
+                border:1px solid #e0e0e0;
+                text-align:center;
+                margin-top:24px;
+                margin-bottom:24px;
+            ">
+                <h4>☕ Found CareerScope AI useful?</h4>
+                <p style="font-size:15px;">
+                    If this helped you gain clarity on your role fit or career direction,
+                    you can support the project with a coffee.
+                </p>
+                <a href="https://www.buymeacoffee.com/revanththiruvallur"
+                   target="_blank"
+                   style="
+                     display:inline-block;
+                     padding:10px 20px;
+                     background-color:#ffdd00;
+                     color:#000;
+                     font-weight:600;
+                     border-radius:8px;
+                     text-decoration:none;
+                   ">
+                   Buy me a coffee ☕
+                </a>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
         # ---------------- AI Improvements ----------------
         st.subheader("🤖 AI JD-Specific Resume Improvements")
