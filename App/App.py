@@ -5,7 +5,6 @@ import random
 import base64
 import pdfplumber
 
-from streamlit_tags import st_tags
 from Courses import (
     ds_course, web_course, android_course,
     ios_course, uiux_course,
@@ -25,16 +24,6 @@ try:
 except Exception:
     def ask_ai(prompt):
         return "AI service unavailable."
-
-# ===================== SESSION STATE INIT =====================
-if "resume_uploaded" not in st.session_state:
-    st.session_state.resume_uploaded = False
-
-if "resume_text" not in st.session_state:
-    st.session_state.resume_text = ""
-
-if "resume_path" not in st.session_state:
-    st.session_state.resume_path = ""
 
 # ===================== HELPERS =====================
 
@@ -67,16 +56,15 @@ def course_recommender(course_list):
 
 # ===================== SCORING LOGIC =====================
 
-def calculate_structure_score(resume_text):
-    checks = {
-        "email": bool(re.search(r"\S+@\S+\.\S+", resume_text)),
-        "phone": bool(re.search(r"\+?\d[\d\s\-]{8,}", resume_text)),
-        "education": "education" in resume_text.lower(),
-        "experience": "experience" in resume_text.lower(),
-        "skills": "skills" in resume_text.lower(),
-    }
-    score = int((sum(checks.values()) / len(checks)) * 100)
-    return score, checks
+def calculate_ats_score(resume_text):
+    checks = [
+        bool(re.search(r"\S+@\S+\.\S+", resume_text)),  # email
+        bool(re.search(r"\+?\d[\d\s\-]{8,}", resume_text)),  # phone
+        "education" in resume_text.lower(),
+        "experience" in resume_text.lower(),
+        "skills" in resume_text.lower(),
+    ]
+    return int((sum(checks) / len(checks)) * 100)
 
 
 def experience_level(resume_text):
@@ -101,11 +89,9 @@ DOMAINS = {
 }
 
 def detect_domain(resume_text):
-    scores = {d: 0 for d in DOMAINS}
+    scores = {}
     for domain, keywords in DOMAINS.items():
-        for kw in keywords:
-            if kw in resume_text.lower():
-                scores[domain] += 1
+        scores[domain] = sum(1 for kw in keywords if kw in resume_text.lower())
     best = max(scores, key=scores.get)
     confidence = int((scores[best] / max(1, sum(scores.values()))) * 100)
     return best, confidence
@@ -123,6 +109,9 @@ page = st.sidebar.radio(
 st.sidebar.markdown("---")
 pdf_file = st.sidebar.file_uploader("Upload Resume (PDF)", type=["pdf"])
 
+resume_uploaded = False
+resume_text = ""
+
 if pdf_file:
     os.makedirs("Uploaded_Resumes", exist_ok=True)
     save_path = f"Uploaded_Resumes/{pdf_file.name}"
@@ -130,106 +119,84 @@ if pdf_file:
     with open(save_path, "wb") as f:
         f.write(pdf_file.getbuffer())
 
-    st.session_state.resume_text = extract_text_from_pdf(save_path)
-    st.session_state.resume_uploaded = True
-    st.session_state.resume_path = save_path
+    resume_text = extract_text_from_pdf(save_path)
+    resume_uploaded = True
 
 # ===================== RESUME OVERVIEW =====================
 if page == "Resume Overview":
-    if st.session_state.resume_uploaded:
+    if resume_uploaded:
         st.subheader("📄 Resume Preview")
-        show_pdf(st.session_state.resume_path)
+        show_pdf(save_path)
     else:
         st.info("Upload a resume to begin analysis.")
 
 # ===================== CAREER INSIGHTS =====================
 if page == "Career Insights":
 
-    if not st.session_state.resume_uploaded:
+    if not resume_uploaded:
         st.warning("Please upload a resume first.")
-        st.stop()
+    else:
+        st.subheader("📊 Career Insights")
 
-    resume_text = st.session_state.resume_text
+        ats_score = calculate_ats_score(resume_text)
+        st.markdown("### 📈 Resume ATS Readiness Score")
+        st.progress(ats_score)
+        st.metric("ATS Score", f"{ats_score}%")
 
-    st.subheader("📊 Career Insights")
+        st.markdown("### 🧭 Experience Level")
+        st.info(experience_level(resume_text))
 
-    # ATS SCORE
-    ats_score, ats_checks = calculate_structure_score(resume_text)
-    st.markdown("### 📈 Resume Structure Score (ATS Readiness)")
-    st.progress(ats_score)
-    st.metric("Score", f"{ats_score}%")
-
-    # ✅ RESUME STRENGTH BREAKDOWN (NOW GUARANTEED)
-    st.markdown("### 🧩 Resume Strength Breakdown")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("📧 Contact Info:", "✅" if ats_checks["email"] and ats_checks["phone"] else "❌")
-        st.write("🎓 Education Section:", "✅" if ats_checks["education"] else "❌")
-    with col2:
-        st.write("💼 Experience Section:", "✅" if ats_checks["experience"] else "❌")
-        st.write("🛠 Skills Section:", "✅" if ats_checks["skills"] else "❌")
-
-    st.caption("Explains exactly why your ATS score is what it is.")
-
-    # EXPERIENCE
-    st.markdown("### 🧭 Experience Level")
-    st.info(experience_level(resume_text))
-
-    # DOMAIN
-    domain, confidence = detect_domain(resume_text)
-    st.markdown("### 🎯 Primary Technical Domain")
-    st.success(f"{domain} ({confidence}% confidence)")
+        domain, confidence = detect_domain(resume_text)
+        st.markdown("### 🎯 Primary Technical Domain")
+        st.success(f"{domain} ({confidence}% confidence)")
 
 # ===================== GROWTH & GUIDANCE =====================
 if page == "Growth & Guidance":
-    if not st.session_state.resume_uploaded:
+    if not resume_uploaded:
         st.warning("Upload a resume to get recommendations.")
-        st.stop()
+    else:
+        course_recommender(ds_course)
 
-    course_recommender(ds_course)
-    st.subheader("🎥 Resume Tips")
-    st.video(random.choice(resume_videos))
-    st.subheader("🎥 Interview Tips")
-    st.video(random.choice(interview_videos))
+        st.subheader("🎥 Resume Tips")
+        st.video(random.choice(resume_videos))
+
+        st.subheader("🎥 Interview Tips")
+        st.video(random.choice(interview_videos))
 
 # ===================== JOB MATCH =====================
 if page == "Job Match":
-    if not st.session_state.resume_uploaded:
+    if not resume_uploaded:
         st.warning("Upload a resume to match with a job description.")
-        st.stop()
+    else:
+        st.subheader("🎯 Job Description Matcher")
+        jd = st.text_area("Paste Job Description")
 
-    resume_text = st.session_state.resume_text
+        if st.button("Analyze Job Fit") and jd:
+            resume_words = set(resume_text.lower().split())
+            jd_words = set(jd.lower().split())
 
-    st.subheader("🎯 Job Description Matcher")
-    jd = st.text_area("Paste Job Description")
+            matched = resume_words & jd_words
+            missing = jd_words - resume_words
 
-    if st.button("Analyze Job Fit") and jd:
-        resume_words = set(resume_text.lower().split())
-        jd_words = set(jd.lower().split())
+            score = int((len(matched) / max(1, len(jd_words))) * 100)
 
-        matched = resume_words & jd_words
-        missing = jd_words - resume_words
+            st.metric("Role Fit Score", f"{score}%")
 
-        score = int((len(matched) / max(1, len(jd_words))) * 100)
+            st.success("Matched Keywords")
+            st.write(", ".join(list(matched)[:50]))
 
-        st.metric("Role Fit Score", f"{score}%")
+            st.warning("Missing Keywords")
+            st.write(", ".join(list(missing)[:50]))
 
-        st.success("Matched Keywords")
-        st.write(", ".join(list(matched)[:50]))
+            st.markdown("### 🤖 AI JD-Specific Resume Improvements")
+            with st.spinner("Generating suggestions..."):
+                prompt = f"""
+                Improve this resume for the following job description.
 
-        st.warning("Missing Keywords")
-        st.write(", ".join(list(missing)[:50]))
+                RESUME:
+                {resume_text}
 
-        st.markdown("### 🤖 AI JD-Specific Resume Improvements")
-        with st.spinner("Generating suggestions..."):
-            prompt = f"""
-            Improve this resume for the following job description.
-
-            RESUME:
-            {resume_text}
-
-            JOB DESCRIPTION:
-            {jd}
-            """
-            st.write(ask_ai(prompt))
+                JOB DESCRIPTION:
+                {jd}
+                """
+                st.write(ask_ai(prompt))
